@@ -18,11 +18,14 @@ class MarketSplit:
        self.b_hat = None
        self.mu = None
        self.b_hat_norms_sq = None
+       self.b_bar = None  # Store dual basis
+       self.b_bar_norms = None
        
        # Run preprocessing
        self._get_extended_matrix()
        self._get_reduced_basis()
        self._get_gso()
+       self._compute_dual_norms()
    
    def _get_extended_matrix(self, N=None):
        if N is None:
@@ -87,7 +90,7 @@ class MarketSplit:
            for j in range(i):
                b_hat_i = b_hat_i - self.mu[i, j] * self.b_hat[j]
            self.b_hat.append(b_hat_i)
-
+   
    def _compute_dual_norms(self):
        # Compute dual basis norms for pruning strategy 2
        n_vectors = self.n - self.m + 1
@@ -97,12 +100,12 @@ class MarketSplit:
        B = self.basis
        gram = B.T @ B
        gram_inv = np.linalg.inv(gram)
-       b_bar = B @ gram_inv
+       self.b_bar = B @ gram_inv
        
        # Store L2 and L1 norms of dual basis vectors
        self.b_bar_norms = {
-           'l2': np.array([np.linalg.norm(b_bar[:, i], 2) for i in range(n_vectors)]),
-           'l1': np.array([np.linalg.norm(b_bar[:, i], 1) for i in range(n_vectors)])
+           'l2': np.array([np.linalg.norm(self.b_bar[:, i], 2) for i in range(n_vectors)]),
+           'l1': np.array([np.linalg.norm(self.b_bar[:, i], 1) for i in range(n_vectors)])
        }
    
    # Pruning strategy 1: Norm bound
@@ -126,3 +129,59 @@ class MarketSplit:
        w_norm_sq = np.dot(w, w)
        w_norm_l1 = np.sum(np.abs(w))
        return w_norm_sq > self.rmax * w_norm_l1
+
+
+def test_dual_basis(ms):
+   """Test if dual basis is computed correctly"""
+   n_vectors = ms.n - ms.m + 1
+   
+   # Check b_bar^(i) · b^(j) = δ_ij
+   print("Testing dual basis property: b_bar^(i) · b^(j) = δ_ij")
+   print("-" * 50)
+   
+   max_error = 0
+   for i in range(n_vectors):
+       for j in range(n_vectors):
+           dot_product = np.dot(ms.b_bar[:, i], ms.basis[:, j])
+           expected = 1.0 if i == j else 0.0
+           error = abs(dot_product - expected)
+           max_error = max(max_error, error)
+           
+           if i < 3 and j < 3:  # Print first few for inspection
+               print(f"b_bar[{i}] · b[{j}] = {dot_product:.6f}, expected = {expected}")
+   
+   print(f"\nMax error in dual basis property: {max_error:.2e}")
+   
+   # Verify u = b_bar^T @ v for any v = B @ u
+   print("\nTesting coordinate extraction: u = b_bar^T @ v")
+   print("-" * 50)
+   
+   # Random test vector
+   u_test = np.random.randn(n_vectors)
+   v_test = ms.basis @ u_test
+   u_recovered = ms.b_bar.T @ v_test
+   
+   recovery_error = np.linalg.norm(u_test - u_recovered)
+   print(f"Original u: {u_test[:3]}...")
+   print(f"Recovered u: {u_recovered[:3]}...")
+   print(f"Recovery error: {recovery_error:.2e}")
+   
+   return max_error < 1e-10 and recovery_error < 1e-10
+
+
+# Test example
+if __name__ == "__main__":
+   m, n = 3, 20
+   A = np.array([
+       [46, 8, 29, 40, 28, 11, 34, 31, 31, 50, 13, 40, 27, 44, 25, 27, 16, 43, 45, 10],
+       [40, 15, 23, 38, 15, 36, 46, 1, 26, 27, 23, 1, 6, 45, 7, 42, 10, 17, 10, 7],
+       [16, 6, 10, 31, 0, 32, 22, 43, 47, 38, 30, 45, 5, 23, 12, 22, 26, 47, 15, 45]
+   ], dtype=int)
+   d = np.array([299, 217, 257], dtype=int)
+   
+   ms = MarketSplit(A, d)
+   
+   if test_dual_basis(ms):
+       print("\n✓ Dual basis test PASSED")
+   else:
+       print("\n✗ Dual basis test FAILED")
