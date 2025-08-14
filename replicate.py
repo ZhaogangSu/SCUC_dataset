@@ -87,3 +87,42 @@ class MarketSplit:
            for j in range(i):
                b_hat_i = b_hat_i - self.mu[i, j] * self.b_hat[j]
            self.b_hat.append(b_hat_i)
+
+   def _compute_dual_norms(self):
+       # Compute dual basis norms for pruning strategy 2
+       n_vectors = self.n - self.m + 1
+       
+       # Dual basis: b_bar^(i) · b^(j) = δ_ij
+       # b_bar = (B^T B)^(-1) B^T where B is the basis matrix
+       B = self.basis
+       gram = B.T @ B
+       gram_inv = np.linalg.inv(gram)
+       b_bar = B @ gram_inv
+       
+       # Store L2 and L1 norms of dual basis vectors
+       self.b_bar_norms = {
+           'l2': np.array([np.linalg.norm(b_bar[:, i], 2) for i in range(n_vectors)]),
+           'l1': np.array([np.linalg.norm(b_bar[:, i], 1) for i in range(n_vectors)])
+       }
+   
+   # Pruning strategy 1: Norm bound
+   def prune_norm(self, w_norm_sq):
+       c = (self.n + 1) * self.rmax ** 2
+       return w_norm_sq > c
+   
+   # Pruning strategy 2: Cauchy-Schwarz bound
+   def get_u_bounds(self):
+       n_vectors = self.n - self.m + 1
+       c = np.sqrt((self.n + 1) * self.rmax ** 2)
+       
+       u_bounds = {
+           'l2': np.array([self.b_bar_norms['l2'][i] * c for i in range(n_vectors)]),
+           'l1': np.array([self.b_bar_norms['l1'][i] * self.rmax for i in range(n_vectors)])
+       }
+       return u_bounds
+   
+   # Pruning strategy 3: Hölder's inequality test
+   def prune_holder(self, w):
+       w_norm_sq = np.dot(w, w)
+       w_norm_l1 = np.sum(np.abs(w))
+       return w_norm_sq > self.rmax * w_norm_l1
